@@ -652,6 +652,41 @@ def main():
         test_webhooks()
         return
 
+    if "--test-full" in sys.argv:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+
+            page = browser.new_page(
+                locale="th-TH",
+                user_agent=(
+                    "Mozilla/5.0 "
+                    "(Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 "
+                    "Chrome/140 Safari/537.36"
+                ),
+            )
+
+            post = {
+                "id": "4407",
+                "board": "13",
+                "title": "อัปเดตประกาศการบํารุงรักษา - 2026.09.30 (ทดสอบระบบ)",
+                "date": "29-09-2026 21:30",
+                "url": f"{BASE_URL}/13/4407",
+            }
+
+            detail = fetch_post_detail(page, post)
+
+            send_post_to_discord(
+                post,
+                detail,
+                BOARDS["13"],
+            )
+
+            browser.close()
+
+        print("✅ ทดสอบส่งประกาศฉบับเต็มสำเร็จ")
+        return
+        
     state = load_state()
 
     with sync_playwright() as p:
