@@ -2,7 +2,8 @@ name: DV3 update monitor
 
 on:
   schedule:
-    - cron: "7 * * * *"   # ทุกชั่วโมง (public repo เปลี่ยนเป็น "*/30 * * * *" ได้)
+    - cron: "7 * * * *"
+
   workflow_dispatch:
     inputs:
       test:
@@ -18,20 +19,26 @@ concurrency: dv3-monitor
 jobs:
   check:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - run: pip install playwright
-      - run: playwright install --with-deps chromium
+      - name: Install Playwright
+        run: pip install playwright
+
+      - name: Install Chromium
+        run: playwright install --with-deps chromium
 
       - name: Run monitor
-env:
-  DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-  DISCORD_EVENT_WEBHOOK_URL: ${{ secrets.DISCORD_EVENT_WEBHOOK_URL }}
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_EVENT_WEBHOOK_URL: ${{ secrets.DISCORD_EVENT_WEBHOOK_URL }}
         run: |
           if [ "${{ inputs.test }}" = "true" ]; then
             python monitor.py --test
