@@ -41,7 +41,7 @@ jobs:
           DISCORD_EVENT_WEBHOOK_URL: ${{ secrets.DISCORD_EVENT_WEBHOOK_URL }}
         run: |
           if [ "${{ inputs.test }}" = "true" ]; then
-            python monitor.py --test-full
+            python monitor.py --test
           else
             python monitor.py
           fi
