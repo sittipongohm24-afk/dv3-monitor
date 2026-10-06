@@ -29,8 +29,9 @@ jobs:
       - run: playwright install --with-deps chromium
 
       - name: Run monitor
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+env:
+  DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+  DISCORD_EVENT_WEBHOOK_URL: ${{ secrets.DISCORD_EVENT_WEBHOOK_URL }}
         run: |
           if [ "${{ inputs.test }}" = "true" ]; then
             python monitor.py --test
