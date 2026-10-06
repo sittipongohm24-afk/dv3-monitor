@@ -61,9 +61,9 @@ def extract_posts(items):
 
     posts = {}
 
-    pattern = re.compile(
-        r"detail\\(['\"](\\d+)['\"]\\s*,\\s*['\"](\\d+)['\"]\\)"
-    )
+pattern = re.compile(
+    r"""detail\(['"](\d+)['"]\s*,\s*['"](\d+)['"]\)"""
+)
 
     for item in items:
         onclick = item.get("onclick", "")
