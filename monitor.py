@@ -20,13 +20,38 @@ def fetch_links():
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(locale="th-TH")
+
         page.goto(URL, wait_until="networkidle", timeout=60000)
         page.wait_for_timeout(3000)
+
+        # DEBUG: ตรวจ element ของรายการประกาศที่เว็บใช้ javascript เปิดโพสต์
+        debug_items = page.locator('a[href="javascript:;"]').evaluate_all("""
+        els => els.map(e => ({
+            text: e.innerText.trim(),
+            html: e.outerHTML,
+            onclick: e.getAttribute('onclick'),
+            data: {...e.dataset},
+            parent: e.parentElement ? e.parentElement.outerHTML : ''
+        }))
+        """)
+
+        print("===== DV3 DEBUG =====")
+        for item in debug_items:
+            if item["text"]:
+                print("TEXT:", item["text"][:120])
+                print("HTML:", item["html"][:1000])
+                print("ONCLICK:", item["onclick"])
+                print("DATA:", item["data"])
+                print("PARENT:", item["parent"][:1500])
+                print("----------------------")
+
         links = page.eval_on_selector_all(
             "a[href]",
             "els => els.map(e => ({href: e.href, text: e.innerText.trim()}))",
         )
+
         browser.close()
+
     return links
 
 
