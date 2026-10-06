@@ -92,32 +92,78 @@ def extract_posts(items):
 
     return posts
 
+def classify_post(title):
+    """จัดประเภทประกาศจากชื่อโพสต์"""
+    t = title.lower()
+
+    if "บำรุงรักษา" in t or "บํารุงรักษา" in t or "ปิดปรับปรุง" in t:
+        return "🔧 ปิดปรับปรุง / Maintenance", 0xE67E22
+
+    if "อัปเดต" in t or "update" in t:
+        return "🆕 อัปเดตเกม", 0x3498DB
+
+    if "กิจกรรม" in t or "event" in t:
+        return "🎉 กิจกรรม", 0x9B59B6
+
+    if "ประกาศ" in t or "notice" in t:
+        return "📢 ประกาศ", 0xF1C40F
+
+    return "🐉 Dragon Village 3", 0x2ECC71
+
+
 def send_discord(post):
-    """ส่งประกาศเข้า Discord."""
+    """ส่งประกาศ DV3 เข้า Discord"""
 
     if not WEBHOOK:
-        raise RuntimeError(
-            "ไม่พบ DISCORD_WEBHOOK_URL ใน GitHub Secrets"
-        )
+        raise RuntimeError("ไม่พบ DISCORD_WEBHOOK_URL ใน GitHub Secrets")
 
-    description = "มีประกาศใหม่ใน Dragon Village 3"
+    category, color = classify_post(post["title"])
 
-    if post.get("date"):
-        description += f"\\n📅 {post['date']}"
+    date_text = post.get("date", "")
+    post_id = post.get("id", "")
+
+    fields = []
+
+    if date_text:
+        fields.append({
+            "name": "📅 วันที่ประกาศ",
+            "value": date_text,
+            "inline": True
+        })
+
+    if post_id:
+        fields.append({
+            "name": "🔎 Post ID",
+            "value": str(post_id),
+            "inline": True
+        })
 
     payload = {
-        "username": "DV3 Update",
-        "embeds": [
-            {
-                "title": post["title"][:250],
-                "url": post["url"],
-                "description": description,
-                "color": 0xF5A623,
-                "footer": {
-                    "text": f"DV3 • Post ID {post['id']}"
-                },
+        "username": "DV3 Update Monitor",
+        "embeds": [{
+            "author": {
+                "name": "Dragon Village 3 • Official Community"
+            },
+
+            "title": f"📢 {post['title'][:240]}",
+
+            "url": post["url"],
+
+            "description": (
+                f"**{category}**\n\n"
+                "ตรวจพบประกาศใหม่จากชุมชนทางการของ "
+                "**Dragon Village 3**\n\n"
+                "👇 **กดที่หัวข้อด้านบนเพื่ออ่านประกาศฉบับเต็ม**"
+            ),
+
+            "color": color,
+
+            "fields": fields,
+
+            "footer": {
+                "text": "DV3 Update Monitor • ตรวจสอบอัตโนมัติ"
             }
-        ],
+        }]
     }
 
     req = urllib.request.Request(
@@ -125,9 +171,9 @@ def send_discord(post):
         data=json.dumps(payload).encode("utf-8"),
         headers={
             "Content-Type": "application/json",
-            "User-Agent": "dv3-monitor/2.0",
+            "User-Agent": "dv3-monitor/3.0"
         },
-        method="POST",
+        method="POST"
     )
 
     with urllib.request.urlopen(req, timeout=30) as response:
