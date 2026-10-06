@@ -260,6 +260,46 @@ def test_webhooks():
 
     print("✅ ส่งห้องกิจกรรมสำเร็จ")
 
+def debug_post_content(page):
+    """ตรวจโครงสร้างหน้ารายละเอียดโพสต์ เพื่อหา selector เนื้อหาจริง"""
+
+    test_url = f"{BASE_URL}/13/4407"
+
+    print("\n===== POST CONTENT DEBUG =====")
+    print("กำลังเปิด:", test_url)
+
+    page.goto(
+        test_url,
+        wait_until="networkidle",
+        timeout=60000
+    )
+
+    page.wait_for_timeout(3000)
+
+    candidates = page.locator(
+        ".view_cont, .view_content, .board_view, "
+        ".content, .contents, article"
+    ).evaluate_all(
+        """
+        els => els.map(el => ({
+            tag: el.tagName,
+            className: el.className || "",
+            text: el.innerText?.trim() || ""
+        })).filter(x => x.text.length > 100)
+        """
+    )
+
+    print("พบ candidate:", len(candidates))
+
+    for i, item in enumerate(candidates[:10]):
+        print("\\n--- CANDIDATE", i + 1, "---")
+        print("TAG:", item["tag"])
+        print("CLASS:", item["className"])
+        print("TEXT:")
+        print(item["text"][:3000])
+
+    print("\n===== END DEBUG =====")
+
 
 def main():
 
@@ -279,6 +319,8 @@ def main():
                 "AppleWebKit/537.36 Chrome/140 Safari/537.36"
             ),
         )
+
+        debug_post_content(page)
 
         for board_id, config in BOARDS.items():
 
