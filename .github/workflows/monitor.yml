@@ -1,0 +1,46 @@
+name: DV3 update monitor
+
+on:
+  schedule:
+    - cron: "7 * * * *"   # ทุกชั่วโมง (public repo เปลี่ยนเป็น "*/30 * * * *" ได้)
+  workflow_dispatch:
+    inputs:
+      test:
+        description: "ส่งข้อความทดสอบเข้า Discord"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency: dv3-monitor
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install playwright
+      - run: playwright install --with-deps chromium
+
+      - name: Run monitor
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ "${{ inputs.test }}" = "true" ]; then
+            python monitor.py --test
+          else
+            python monitor.py
+          fi
+
+      - name: Save state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add seen.json || true
+          git diff --cached --quiet || (git commit -m "update seen posts" && git push)
