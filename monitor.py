@@ -1,4 +1,4 @@
-"""Dragon Village 3 board -> Discord notifier (GitHub Actions)."""
+"""Dragon Village 3 boards -> Discord notifier."""
 
 import json
 import os
@@ -10,16 +10,264 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 
-BOARD_ID = "13"
-URL = f"https://community.withhive.com/dv3/th/board/{BOARD_ID}"
-WEBHOOK = os.environ.get("DISCORD_WEBHOOK_URL")
+BASE_URL = "https://community.withhive.com/dv3/th/board"
+
+UPDATE_WEBHOOK = os.environ.get("DISCORD_WEBHOOK_URL")
+EVENT_WEBHOOK = os.environ.get("DISCORD_EVENT_WEBHOOK_URL")
 
 STATE = Path("seen.json")
 MAX_PER_RUN = 10
 
+BOARDS = {
+    "13": {
+        "name": "อัปเดตเกม",
+        "emoji": "🔧",
+        "webhook": UPDATE_WEBHOOK,
+    },
+    "5": {
+        "name": "กิจกรรม",
+        "emoji": "🎉",
+        "webhook": EVENT_WEBHOOK,
+    },
+}
 
-def fetch_posts():
-    """เปิดหน้า DV3 และดึง Post ID จาก onclick="detail('13', '4407')"."""
+
+def fetch_posts(page, board_id):
+    """ดึงรายการโพสต์จากบอร์ดที่กำหนด"""
+
+    url = f"{BASE_URL}/{board_id}"
+
+    print(f"\nกำลังตรวจ Board {board_id}...")
+
+    page.goto(url, wait_until="networkidle", timeout=60000)
+    page.wait_for_timeout(3000)
+
+    items = page.locator(
+        "li[onclick*=\"detail('\"]"
+    ).evaluate_all(
+        """
+        els => els.map(el => ({
+            onclick: el.getAttribute("onclick") || "",
+            title:
+                el.querySelector(".tit strong")?.innerText?.trim()
+                || el.querySelector("strong")?.innerText?.trim()
+                || "",
+            date:
+                el.querySelector(".t_date")?.innerText?.trim()
+                || ""
+        }))
+        """
+    )
+
+    pattern = re.compile(
+        r"""detail\(['"](\d+)['"]\s*,\s*['"](\d+)['"]\)"""
+    )
+
+    posts = {}
+
+    for item in items:
+        match = pattern.search(item.get("onclick", ""))
+
+        if not match:
+            continue
+
+        found_board = match.group(1)
+        post_id = match.group(2)
+
+        # ป้องกันการอ่านโพสต์จากบอร์ดอื่น
+        if found_board != board_id:
+            continue
+
+        title = item.get("title") or f"โพสต์ #{post_id}"
+
+        posts[post_id] = {
+            "id": post_id,
+            "board": board_id,
+            "title": title,
+            "date": item.get("date", ""),
+            "url": f"{BASE_URL}/{board_id}/{post_id}",
+        }
+
+    print(f"พบรายการ HTML: {len(items)}")
+    print(f"พบโพสต์: {len(posts)}")
+
+    latest = sorted(posts.keys(), key=int, reverse=True)[:3]
+
+    for pid in latest:
+        print(f"  {pid} | {posts[pid]['title']}")
+
+    return posts
+
+
+def send_discord(post, board_config):
+    """ส่งโพสต์ไปยัง Discord ของบอร์ดนั้น"""
+
+    webhook = board_config["webhook"]
+
+    if not webhook:
+        raise RuntimeError(
+            f"ไม่พบ Webhook สำหรับ Board {post['board']}"
+        )
+
+    emoji = board_config["emoji"]
+    board_name = board_config["name"]
+
+    fields = []
+
+    if post.get("date"):
+        fields.append({
+            "name": "📅 วันที่ประกาศ",
+            "value": post["date"],
+            "inline": True,
+        })
+
+    fields.append({
+        "name": "🔎 Post ID",
+        "value": str(post["id"]),
+        "inline": True,
+    })
+
+    if post["board"] == "5":
+        description = (
+            "ตรวจพบ **กิจกรรมใหม่** จาก Dragon Village 3 🎉\n\n"
+            "กดที่หัวข้อด้านบนเพื่ออ่านรายละเอียดกิจกรรมฉบับเต็ม"
+        )
+        color = 0x9B59B6
+
+    else:
+        description = (
+            "ตรวจพบ **ประกาศอัปเดตใหม่** จาก Dragon Village 3 🔧\n\n"
+            "กดที่หัวข้อด้านบนเพื่ออ่านประกาศฉบับเต็ม"
+        )
+        color = 0x3498DB
+
+    payload = {
+        "username": "DV3 Monitor",
+        "embeds": [{
+            "author": {
+                "name": f"Dragon Village 3 • {board_name}"
+            },
+            "title": f"{emoji} {post['title'][:240]}",
+            "url": post["url"],
+            "description": description,
+            "color": color,
+            "fields": fields,
+            "footer": {
+                "text": (
+                    f"DV3 Monitor • Board {post['board']} "
+                    f"• Post {post['id']}"
+                )
+            },
+        }],
+    }
+
+    req = urllib.request.Request(
+        webhook,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "dv3-monitor/4.0",
+        },
+        method="POST",
+    )
+
+    with urllib.request.urlopen(req, timeout=30) as response:
+        response.read()
+
+
+def load_state():
+    """
+    รองรับ seen.json แบบเก่าที่เป็น list ของ Board 13
+    และแบบใหม่ที่แยก Board 13 / Board 5
+    """
+
+    if not STATE.exists():
+        return {}
+
+    try:
+        data = json.loads(
+            STATE.read_text(encoding="utf-8")
+        )
+
+        # seen.json เวอร์ชันเก่า
+        if isinstance(data, list):
+            print("พบ seen.json เวอร์ชันเดิม")
+            return {
+                "13": set(str(x) for x in data)
+            }
+
+        # seen.json เวอร์ชันใหม่
+        if isinstance(data, dict):
+            return {
+                str(board): set(str(x) for x in ids)
+                for board, ids in data.items()
+            }
+
+    except Exception as e:
+        print("อ่าน seen.json ไม่สำเร็จ:", e)
+
+    return {}
+
+
+def save_state(state):
+    """บันทึกประวัติแยกตาม Board"""
+
+    output = {}
+
+    for board_id, ids in state.items():
+        output[board_id] = sorted(ids, key=int)
+
+    STATE.write_text(
+        json.dumps(
+            output,
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_webhooks():
+    """ทดสอบ Webhook ทั้งสองห้อง"""
+
+    print("กำลังทดสอบห้องอัปเดตเกม...")
+
+    send_discord(
+        {
+            "id": "999999",
+            "board": "13",
+            "title": "ทดสอบระบบแจ้งเตือนอัปเดตเกม",
+            "date": "",
+            "url": f"{BASE_URL}/13",
+        },
+        BOARDS["13"],
+    )
+
+    print("✅ ส่งห้องอัปเดตเกมสำเร็จ")
+
+    print("กำลังทดสอบห้องกิจกรรม...")
+
+    send_discord(
+        {
+            "id": "999999",
+            "board": "5",
+            "title": "ทดสอบระบบแจ้งเตือนกิจกรรม",
+            "date": "",
+            "url": f"{BASE_URL}/5",
+        },
+        BOARDS["5"],
+    )
+
+    print("✅ ส่งห้องกิจกรรมสำเร็จ")
+
+
+def main():
+
+    if "--test" in sys.argv:
+        test_webhooks()
+        return
+
+    state = load_state()
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -32,294 +280,71 @@ def fetch_posts():
             ),
         )
 
-        page.goto(URL, wait_until="networkidle", timeout=60000)
-        page.wait_for_timeout(3000)
+        for board_id, config in BOARDS.items():
 
-        items = page.locator("li[onclick*=\"detail('\"]").evaluate_all(
-            """
-            els => els.map(el => ({
-                onclick: el.getAttribute("onclick") || "",
-                title:
-                    el.querySelector(".tit strong")?.innerText?.trim()
-                    || el.querySelector("strong")?.innerText?.trim()
-                    || el.innerText?.trim()
-                    || "",
-                date:
-                    el.querySelector(".t_date")?.innerText?.trim()
-                    || ""
-            }))
-            """
-        )
+            posts = fetch_posts(page, board_id)
+
+            if not posts:
+                browser.close()
+                raise RuntimeError(
+                    f"ไม่พบโพสต์ใน Board {board_id}"
+                )
+
+            # Board ที่ยังไม่เคยตรวจมาก่อน
+            if board_id not in state:
+
+                state[board_id] = set(posts.keys())
+
+                print(
+                    f"Board {board_id} รันครั้งแรก: "
+                    f"บันทึก {len(posts)} โพสต์ "
+                    "โดยไม่ส่ง Discord"
+                )
+
+                continue
+
+            seen = state[board_id]
+
+            new_ids = [
+                pid
+                for pid in posts
+                if pid not in seen
+            ]
+
+            new_ids.sort(key=int)
+
+            if not new_ids:
+                print(
+                    f"Board {board_id}: ไม่มีประกาศใหม่"
+                )
+                continue
+
+            print(
+                f"Board {board_id}: "
+                f"พบใหม่ {len(new_ids)} รายการ"
+            )
+
+            for pid in new_ids[-MAX_PER_RUN:]:
+
+                send_discord(
+                    posts[pid],
+                    config,
+                )
+
+                print(
+                    "ส่ง Discord แล้ว:",
+                    pid,
+                    "|",
+                    posts[pid]["title"],
+                )
+
+            seen.update(posts.keys())
 
         browser.close()
 
-    return items
+    save_state(state)
 
-
-def extract_posts(items):
-    """แปลงข้อมูลจากหน้าเว็บเป็น dictionary ของโพสต์."""
-
-    posts = {}
-
-    pattern = re.compile(
-        r"""detail\(['"](\d+)['"]\s*,\s*['"](\d+)['"]\)"""
-    )
-
-    for item in items:
-        onclick = item.get("onclick", "")
-        match = pattern.search(onclick)
-
-        if not match:
-            continue
-
-        board_id = match.group(1)
-        post_id = match.group(2)
-
-        title = item.get("title") or f"โพสต์ #{post_id}"
-        date = item.get("date", "")
-
-        post_url = (
-            f"https://community.withhive.com/"
-            f"dv3/th/board/{board_id}/{post_id}"
-        )
-
-        posts[post_id] = {
-            "id": post_id,
-            "title": title,
-            "date": date,
-            "url": post_url,
-        }
-
-    return posts
-
-def classify_post(title):
-    """จัดประเภทประกาศจากชื่อโพสต์"""
-    t = title.lower()
-
-    if "บำรุงรักษา" in t or "บํารุงรักษา" in t or "ปิดปรับปรุง" in t:
-        return "🔧 ปิดปรับปรุง / Maintenance", 0xE67E22
-
-    if "อัปเดต" in t or "update" in t:
-        return "🆕 อัปเดตเกม", 0x3498DB
-
-    if "กิจกรรม" in t or "event" in t:
-        return "🎉 กิจกรรม", 0x9B59B6
-
-    if "ประกาศ" in t or "notice" in t:
-        return "📢 ประกาศ", 0xF1C40F
-
-    return "🐉 Dragon Village 3", 0x2ECC71
-
-
-def send_discord(post):
-    """ส่งประกาศ DV3 เข้า Discord"""
-
-    if not WEBHOOK:
-        raise RuntimeError("ไม่พบ DISCORD_WEBHOOK_URL ใน GitHub Secrets")
-
-    category, color = classify_post(post["title"])
-
-    date_text = post.get("date", "")
-    post_id = post.get("id", "")
-
-    fields = []
-
-    if date_text:
-        fields.append({
-            "name": "📅 วันที่ประกาศ",
-            "value": date_text,
-            "inline": True
-        })
-
-    if post_id:
-        fields.append({
-            "name": "🔎 Post ID",
-            "value": str(post_id),
-            "inline": True
-        })
-
-    payload = {
-        "username": "DV3 Update Monitor",
-        "embeds": [{
-            "author": {
-                "name": "Dragon Village 3 • Official Community"
-            },
-
-            "title": f"📢 {post['title'][:240]}",
-
-            "url": post["url"],
-
-            "description": (
-                f"**{category}**\n\n"
-                "ตรวจพบประกาศใหม่จากชุมชนทางการของ "
-                "**Dragon Village 3**\n\n"
-                "👇 **กดที่หัวข้อด้านบนเพื่ออ่านประกาศฉบับเต็ม**"
-            ),
-
-            "color": color,
-
-            "fields": fields,
-
-            "footer": {
-                "text": "DV3 Update Monitor • ตรวจสอบอัตโนมัติ"
-            }
-        }]
-    }
-
-    req = urllib.request.Request(
-        WEBHOOK,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "User-Agent": "dv3-monitor/3.0"
-        },
-        method="POST"
-    )
-
-    with urllib.request.urlopen(req, timeout=30) as response:
-        response.read()
-
-
-def load_seen():
-    if not STATE.exists():
-        return None
-
-    try:
-        data = json.loads(STATE.read_text(encoding="utf-8"))
-        return set(str(x) for x in data)
-
-    except Exception:
-        return set()
-
-
-def save_seen(seen):
-    STATE.write_text(
-        json.dumps(
-            sorted(seen, key=int),
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-
-
-def main():
-
-    # -------------------------
-    # TEST DISCORD
-    # -------------------------
-
-    if "--test" in sys.argv:
-
-        send_discord(
-            {
-                "id": "TEST",
-                "title": "✅ DV3 Monitor ทำงานสำเร็จ",
-                "date": "",
-                "url": URL,
-            }
-        )
-
-        print("ส่งข้อความทดสอบเข้า Discord สำเร็จ")
-        return
-
-    # -------------------------
-    # FETCH DV3
-    # -------------------------
-
-    print("กำลังตรวจสอบ DV3...")
-
-    items = fetch_posts()
-
-    print(f"พบรายการ HTML: {len(items)}")
-
-    posts = extract_posts(items)
-
-    print(f"พบโพสต์ DV3: {len(posts)}")
-
-    if not posts:
-        print("ERROR: ไม่สามารถหา Post ID จากหน้า DV3 ได้")
-
-        for item in items[:5]:
-            print(
-                "DEBUG:",
-                item.get("onclick"),
-                "|",
-                item.get("title"),
-            )
-
-        sys.exit(1)
-
-    # แสดงโพสต์ล่าสุดที่ตรวจพบ
-    latest_ids = sorted(posts.keys(), key=int, reverse=True)[:5]
-
-    print("โพสต์ล่าสุด:")
-
-    for pid in latest_ids:
-        print(
-            pid,
-            "|",
-            posts[pid]["title"],
-        )
-
-    # -------------------------
-    # LOAD STATE
-    # -------------------------
-
-    seen = load_seen()
-
-    # ครั้งแรก
-    if seen is None:
-
-        save_seen(set(posts.keys()))
-
-        print(
-            f"รันครั้งแรก: บันทึก {len(posts)} โพสต์ "
-            "โดยไม่ส่ง Discord"
-        )
-
-        return
-
-    # -------------------------
-    # FIND NEW POSTS
-    # -------------------------
-
-    new_ids = [
-        pid
-        for pid in posts
-        if pid not in seen
-    ]
-
-    new_ids.sort(key=int)
-
-    if not new_ids:
-        print("ไม่มีประกาศใหม่")
-        return
-
-    print(f"พบประกาศใหม่ {len(new_ids)} รายการ")
-
-    # ป้องกัน Discord ท่วม
-    notify_ids = new_ids[-MAX_PER_RUN:]
-
-    for pid in notify_ids:
-
-        post = posts[pid]
-
-        send_discord(post)
-
-        print(
-            "ส่ง Discord แล้ว:",
-            pid,
-            "|",
-            post["title"],
-        )
-
-    # บันทึกทุกโพสต์ที่พบ
-    seen.update(posts.keys())
-
-    save_seen(seen)
-
-    print("อัปเดต seen.json สำเร็จ")
+    print("\n✅ อัปเดต seen.json สำเร็จ")
 
 
 if __name__ == "__main__":
