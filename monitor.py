@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import urllib.request
+import urllib.error
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -22,7 +23,7 @@ MAX_PER_RUN = 10
 
 # Discord embed description จำกัด 4096 ตัวอักษร
 # ใช้น้อยกว่านั้นเพื่อเผื่อข้อความอื่น
-CHUNK_SIZE = 3500
+CHUNK_SIZE = 1800
 
 # จำกัดจำนวนส่วนต่อโพสต์ ป้องกันกรณีเว็บผิดปกติ
 MAX_PARTS = 20
@@ -374,26 +375,49 @@ def split_text(text, limit=CHUNK_SIZE):
 def discord_request(webhook, payload):
     """ส่ง payload ไป Discord"""
 
+    data = json.dumps(
+        payload,
+        ensure_ascii=False,
+    ).encode("utf-8")
+
+    print(
+        f"กำลังส่ง Discord: "
+        f"{len(data)} bytes"
+    )
+
     req = urllib.request.Request(
         webhook,
-        data=json.dumps(
-            payload,
-            ensure_ascii=False,
-        ).encode("utf-8"),
+        data=data,
         headers={
-            "Content-Type":
-                "application/json",
-            "User-Agent":
-                "dv3-monitor/5.0",
+            "Content-Type": "application/json",
+            "User-Agent": "dv3-monitor/5.1",
         },
         method="POST",
     )
 
-    with urllib.request.urlopen(
-        req,
-        timeout=30,
-    ) as response:
-        response.read()
+    try:
+        with urllib.request.urlopen(
+            req,
+            timeout=30,
+        ) as response:
+            response.read()
+
+    except urllib.error.HTTPError as e:
+
+        error_body = e.read().decode(
+            "utf-8",
+            errors="replace",
+        )
+
+        print(
+            f"❌ Discord HTTP {e.code}"
+        )
+        print(
+            "Discord response:",
+            error_body[:1000],
+        )
+
+        raise
 
 
 def send_post_to_discord(
