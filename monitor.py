@@ -57,7 +57,34 @@ def fetch_posts(page, board_id):
     )
 
     page.wait_for_timeout(2500)
+print("URL หลังโหลด:", page.url)
+print("TITLE:", page.title())
 
+print("\n===== รายการ LI ที่ GitHub มองเห็น =====")
+
+debug_items = page.locator("li").evaluate_all(
+    """
+    els => els.map(el => ({
+        text: (el.innerText || "").trim(),
+        onclick: el.getAttribute("onclick") || ""
+    }))
+    .filter(x =>
+        x.text &&
+        (
+            x.onclick.includes("detail") ||
+            x.text.includes("2026.10") ||
+            x.text.includes("2026.10.07") ||
+            x.text.includes("2026.10.7")
+        )
+    )
+    .slice(0, 50)
+    """
+)
+
+for item in debug_items:
+    print("ONCLICK:", item["onclick"])
+    print("TEXT:", item["text"][:500])
+    print("---")
     items = page.locator(
         "li[onclick*=\"detail('\"]"
     ).evaluate_all(
