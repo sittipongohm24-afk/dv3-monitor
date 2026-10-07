@@ -49,6 +49,7 @@ def fetch_posts(page, board_id):
     url = f"{BASE_URL}/{board_id}"
 
     print(f"\nกำลังตรวจ Board {board_id}...")
+    print("URL:", url)
 
     page.goto(
         url,
@@ -56,35 +57,42 @@ def fetch_posts(page, board_id):
         timeout=60000,
     )
 
-    page.wait_for_timeout(2500)
-print("URL หลังโหลด:", page.url)
-print("TITLE:", page.title())
+    page.wait_for_timeout(3000)
 
-print("\n===== รายการ LI ที่ GitHub มองเห็น =====")
+    print("URL หลังโหลด:", page.url)
+    print("TITLE:", page.title())
 
-debug_items = page.locator("li").evaluate_all(
-    """
-    els => els.map(el => ({
-        text: (el.innerText || "").trim(),
-        onclick: el.getAttribute("onclick") || ""
-    }))
-    .filter(x =>
-        x.text &&
-        (
-            x.onclick.includes("detail") ||
-            x.text.includes("2026.10") ||
-            x.text.includes("2026.10.07") ||
-            x.text.includes("2026.10.7")
+    # ==========================================
+    # DEBUG: ดูรายการที่ GitHub Actions มองเห็น
+    # ==========================================
+
+    print("\n===== รายการ LI ที่ GitHub มองเห็น =====")
+
+    debug_items = page.locator("li").evaluate_all(
+        """
+        els => els.map(el => ({
+            text: (el.innerText || "").trim(),
+            onclick: el.getAttribute("onclick") || ""
+        }))
+        .filter(x =>
+            x.text &&
+            x.onclick.includes("detail")
         )
+        .slice(0, 50)
+        """
     )
-    .slice(0, 50)
-    """
-)
 
-for item in debug_items:
-    print("ONCLICK:", item["onclick"])
-    print("TEXT:", item["text"][:500])
-    print("---")
+    for item in debug_items:
+        print("ONCLICK:", item["onclick"])
+        print("TEXT:", item["text"][:500])
+        print("---")
+
+    print("===== END LI DEBUG =====\n")
+
+    # ==========================================
+    # อ่านโพสต์
+    # ==========================================
+
     items = page.locator(
         "li[onclick*=\"detail('\"]"
     ).evaluate_all(
@@ -146,7 +154,9 @@ for item in debug_items:
         posts.keys(),
         key=int,
         reverse=True,
-    )[:3]
+    )[:5]
+
+    print("โพสต์ล่าสุดที่ตรวจพบ:")
 
     for pid in latest:
         print(
