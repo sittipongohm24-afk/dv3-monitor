@@ -6,6 +6,7 @@ import re
 import sys
 import urllib.request
 import urllib.error
+import time
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -373,7 +374,7 @@ def split_text(text, limit=CHUNK_SIZE):
 
 
 def discord_request(webhook, payload):
-    """ส่ง payload ไป Discord"""
+    """ส่ง Discord พร้อมจัดการ Rate Limit อัตโนมัติ"""
 
     data = json.dumps(
         payload,
@@ -385,39 +386,92 @@ def discord_request(webhook, payload):
         f"{len(data)} bytes"
     )
 
-    req = urllib.request.Request(
-        webhook,
-        data=data,
-        headers={
-            "Content-Type": "application/json",
-            "User-Agent": "dv3-monitor/5.1",
-        },
-        method="POST",
+    max_retries = 10
+
+    for attempt in range(max_retries):
+
+        req = urllib.request.Request(
+            webhook,
+            data=data,
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "dv3-monitor/5.2",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(
+                req,
+                timeout=30,
+            ) as response:
+                response.read()
+
+            # เว้นระยะทุกข้อความ
+            # ป้องกันยิง Discord เร็วเกินไป
+            time.sleep(0.8)
+
+            return
+
+        except urllib.error.HTTPError as e:
+
+            error_body = e.read().decode(
+                "utf-8",
+                errors="replace",
+            )
+
+            # Discord Rate Limit
+            if e.code == 429:
+
+                retry_after = 1.0
+
+                try:
+                    error_data = json.loads(
+                        error_body
+                    )
+
+                    retry_after = float(
+                        error_data.get(
+                            "retry_after",
+                            1.0,
+                        )
+                    )
+
+                except Exception:
+                    pass
+
+                # เผื่อเวลาเพิ่มเล็กน้อย
+                wait_time = max(
+                    retry_after + 0.5,
+                    1.0,
+                )
+
+                print(
+                    "⏳ Discord Rate Limit "
+                    f"รอ {wait_time:.2f} วินาที "
+                    f"แล้วลองใหม่ "
+                    f"({attempt + 1}/{max_retries})"
+                )
+
+                time.sleep(wait_time)
+
+                continue
+
+            print(
+                f"❌ Discord HTTP {e.code}"
+            )
+
+            print(
+                "Discord response:",
+                error_body[:1000],
+            )
+
+            raise
+
+    raise RuntimeError(
+        "Discord ยัง Rate Limit "
+        "หลังจากลองใหม่หลายครั้ง"
     )
-
-    try:
-        with urllib.request.urlopen(
-            req,
-            timeout=30,
-        ) as response:
-            response.read()
-
-    except urllib.error.HTTPError as e:
-
-        error_body = e.read().decode(
-            "utf-8",
-            errors="replace",
-        )
-
-        print(
-            f"❌ Discord HTTP {e.code}"
-        )
-        print(
-            "Discord response:",
-            error_body[:1000],
-        )
-
-        raise
 
 
 def send_post_to_discord(
