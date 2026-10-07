@@ -896,23 +896,23 @@ def main():
                     post,
                 )
 
+
                 send_post_to_discord(
                     post,
                     detail,
                     config,
                 )
 
+                # บันทึกทันทีหลังส่ง Discord สำเร็จ
+                seen.add(pid)
+                save_state(state)
+
                 print(
-                    "✅ ส่งรายละเอียดแล้ว:",
+                    "✅ ส่งรายละเอียดแล้ว + บันทึก seen:",
                     pid,
                     "|",
                     post["title"],
                 )
-
-            # บันทึกหลังส่งสำเร็จ
-            seen.update(
-                posts.keys()
-            )
 
         browser.close()
 
