@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+from summary import enqueue
 
 
 BASE_URL = "https://community.withhive.com/dv3/th/board"
@@ -902,6 +903,9 @@ def main():
                     detail,
                     config,
                 )
+
+                # Durable summary outbox after original delivery succeeds.
+                enqueue(post, detail)
 
                 # บันทึกทันทีหลังส่ง Discord สำเร็จ
                 seen.add(pid)
