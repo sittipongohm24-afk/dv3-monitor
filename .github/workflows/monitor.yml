@@ -65,6 +65,21 @@ jobs:
           with sync_playwright() as p:
               browser = p.chromium.launch()
               page = browser.new_page()
+              page.goto("https://community.withhive.com/dv3/th/board/13", wait_until="domcontentloaded", timeout=60000)
+              page.wait_for_timeout(5000)
+              diagnostic = page.locator("body").evaluate("""body => {
+                  const out = {anchors: [], titleAncestors: []};
+                  for (const a of body.querySelectorAll("a")) {
+                      const t = (a.innerText || "").trim();
+                      const h = a.getAttribute("href") || "";
+                      if (t || h) out.anchors.push({text:t.slice(0,120), href:h, onclick:a.getAttribute("onclick"), cls:a.className});
+                  }
+                  const target = [...body.querySelectorAll("*")].find(e => (e.children.length === 0) && (e.innerText || "").includes("อัปเดตประกาศบ"));
+                  let e = target;
+                  for (let i=0; e && i<6; i++, e=e.parentElement) out.titleAncestors.push(e.outerHTML.slice(0,2500));
+                  return out;
+              }""")
+              print("HIVE DOM DIAGNOSTIC:", diagnostic)
               for board_id in ("13", "5"):
                   posts = fetch_posts(page, board_id)
                   if not posts:
