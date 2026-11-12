@@ -68,7 +68,7 @@ def fetch_posts(page, board_id):
             """boardId => {
                 const escaped = String(boardId);
                 return document.querySelector(
-                    'li[onclick*="detail"], [onclick*="detail"], ' +
+                    'li[onclick*="goToPost"], [onclick*="goToPost"], ' +
                     'a[href*="/board/' + escaped + '/"]'
                 ) !== null;
             }""",
@@ -108,8 +108,10 @@ def fetch_posts(page, board_id):
                     /detail\s*\(\s*['"]?(\d+)['"]?\s*,\s*['"]?(\d+)['"]?\s*\)/gi
                 )];
 
-                const pathMatches = [...href.matchAll(
-                    /\/board\/(\d+)\/(\d+)(?:[/?#]|$)/g
+                // Hive Thai board ปัจจุบันใช้ onclick="goToPost('FULL_URL')"
+                // ดังนั้นต้องค้นหา URL จากทั้ง onclick และ href ไม่ใช่ href อย่างเดียว
+                const pathMatches = [...source.matchAll(
+                    /\/board\/(\d+)\/(\d+)(?:[/?#'"]|$)/g
                 )];
 
                 const ids = [];
@@ -140,6 +142,7 @@ def fetch_posts(page, board_id):
                         el;
 
                     const titleNode =
+                        container.querySelector(".title") ||
                         container.querySelector(".tit strong") ||
                         container.querySelector(".tit") ||
                         container.querySelector("strong") ||
@@ -147,6 +150,7 @@ def fetch_posts(page, board_id):
                         container;
 
                     const dateNode =
+                        container.querySelector(".date") ||
                         container.querySelector(".t_date") ||
                         container.querySelector("time") ||
                         container.querySelector("[class*='date']");
