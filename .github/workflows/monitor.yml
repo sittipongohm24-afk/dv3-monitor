@@ -1,6 +1,9 @@
 name: DV3 update monitor
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
   schedule:
     - cron: "7 * * * *"
 
@@ -17,7 +20,24 @@ permissions:
 concurrency: dv3-monitor
 
 jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate Python syntax
+        run: python -m py_compile monitor.py
+
   check:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
 
     steps:
