@@ -46,7 +46,7 @@ BOARDS = {
 
 
 def fetch_posts(page, board_id):
-    """อ่านรายการโพสต์จากหน้าบอร์ด"""
+    """อ่านรายการโพสต์จากหน้า Hive โดยรองรับโครงสร้าง DOM หลายรูปแบบ"""
 
     url = f"{BASE_URL}/{board_id}"
 
@@ -55,119 +55,167 @@ def fetch_posts(page, board_id):
 
     page.goto(
         url,
-        wait_until="networkidle",
+        wait_until="domcontentloaded",
         timeout=60000,
     )
 
-    page.wait_for_timeout(3000)
+    # Hive อาจโหลดรายการโพสต์ภายหลังจาก HTML หลัก
+    page.wait_for_timeout(5000)
+
+    # รอรายการแบบเดิมหรือ link ของหน้าโพสต์แบบใหม่
+    try:
+        page.wait_for_function(
+            """boardId => {
+                const escaped = String(boardId);
+                return document.querySelector(
+                    'li[onclick*="detail"], [onclick*="detail"], ' +
+                    'a[href*="/board/' + escaped + '/"]'
+                ) !== null;
+            }""",
+            arg=board_id,
+            timeout=12000,
+        )
+    except Exception:
+        # ไม่สรุปว่าเว็บล้มเหลวตรงนี้ ให้ลองอ่าน DOM และรายงานสาเหตุด้านล่าง
+        pass
 
     print("URL หลังโหลด:", page.url)
     print("TITLE:", page.title())
 
-    # ==========================================
-    # DEBUG: ดูรายการที่ GitHub Actions มองเห็น
-    # ==========================================
+    # อ่านข้อมูลจาก onclick, href และ data attributes
+    # ไม่ผูกกับ tag <li> เพียงชนิดเดียว
+    candidates = page.locator("body").evaluate(
+        """(body) => {
+            const result = [];
+            const seen = new Set();
+            const nodes = body.querySelectorAll("*");
 
-    print("\n===== รายการ LI ที่ GitHub มองเห็น =====")
+            for (const el of nodes) {
+                const attrs = {};
+                for (const attr of el.attributes || []) {
+                    attrs[attr.name.toLowerCase()] = attr.value || "";
+                }
 
-    debug_items = page.locator("li").evaluate_all(
-        """
-        els => els.map(el => ({
-            text: (el.innerText || "").trim(),
-            onclick: el.getAttribute("onclick") || ""
-        }))
-        .filter(x =>
-            x.text &&
-            x.onclick.includes("detail")
-        )
-        .slice(0, 50)
-        """
-    )
+                const onclick = attrs.onclick || "";
+                const href = attrs.href || "";
+                const dataId =
+                    attrs["data-post-id"] ||
+                    attrs["data-article-id"] ||
+                    attrs["data-id"] || "";
 
-    for item in debug_items:
-        print("ONCLICK:", item["onclick"])
-        print("TEXT:", item["text"][:500])
-        print("---")
+                const source = onclick + " " + href;
+                const detailMatches = [...source.matchAll(
+                    /detail\\s*\\(\\s*['"]?(\\d+)['"]?\\s*,\\s*['"]?(\\d+)['"]?\\s*\\)/gi
+                )];
 
-    print("===== END LI DEBUG =====\n")
+                const pathMatches = [...href.matchAll(
+                    /\\/board\\/(\\d+)\\/(\\d+)(?:[/?#]|$)/g
+                )];
 
-    # ==========================================
-    # อ่านโพสต์
-    # ==========================================
+                const ids = [];
+                for (const m of detailMatches) {
+                    ids.push({board: m[1], id: m[2]});
+                }
+                for (const m of pathMatches) {
+                    ids.push({board: m[1], id: m[2]});
+                }
 
-    items = page.locator(
-        "li[onclick*=\"detail('\"]"
-    ).evaluate_all(
-        """
-        els => els.map(el => ({
-            onclick: el.getAttribute("onclick") || "",
-            title:
-                el.querySelector(".tit strong")?.innerText?.trim()
-                || el.querySelector("strong")?.innerText?.trim()
-                || "",
-            date:
-                el.querySelector(".t_date")?.innerText?.trim()
-                || ""
-        }))
-        """
-    )
+                // รองรับ data-id เมื่อมี element ระบุ board ชัดเจน
+                const dataBoard =
+                    attrs["data-board-id"] ||
+                    attrs["data-board"] || "";
+                if (/^\\d+$/.test(dataId) && dataBoard) {
+                    ids.push({board: dataBoard, id: dataId});
+                }
 
-    pattern = re.compile(
-        r"""detail\(['"](\d+)['"]\s*,\s*['"](\d+)['"]\)"""
+                for (const item of ids) {
+                    const key = item.board + ":" + item.id;
+                    if (seen.has(key)) continue;
+                    seen.add(key);
+
+                    const container =
+                        el.closest("li") ||
+                        el.closest("article") ||
+                        el.closest("[class*='item']") ||
+                        el;
+
+                    const titleNode =
+                        container.querySelector(".tit strong") ||
+                        container.querySelector(".tit") ||
+                        container.querySelector("strong") ||
+                        container.querySelector("a") ||
+                        container;
+
+                    const dateNode =
+                        container.querySelector(".t_date") ||
+                        container.querySelector("time") ||
+                        container.querySelector("[class*='date']");
+
+                    result.push({
+                        board: item.board,
+                        id: item.id,
+                        title: (titleNode?.innerText || "").trim(),
+                        date: (dateNode?.innerText || dateNode?.getAttribute("datetime") || "").trim(),
+                        source: href ? "href" : "onclick"
+                    });
+                }
+            }
+            return result;
+        }"""
     )
 
     posts = {}
 
-    for item in items:
-
-        match = pattern.search(
-            item.get("onclick", "")
-        )
-
-        if not match:
+    for item in candidates:
+        if str(item.get("board", "")) != str(board_id):
             continue
 
-        found_board = match.group(1)
-        post_id = match.group(2)
-
-        if found_board != board_id:
+        post_id = str(item.get("id", "")).strip()
+        if not post_id.isdigit():
             continue
 
-        title = (
-            item.get("title")
-            or f"โพสต์ #{post_id}"
-        )
+        title = item.get("title") or f"โพสต์ #{post_id}"
 
         posts[post_id] = {
             "id": post_id,
-            "board": board_id,
+            "board": str(board_id),
             "title": title,
             "date": item.get("date", ""),
-            "url": (
-                f"{BASE_URL}/"
-                f"{board_id}/{post_id}"
-            ),
+            "url": f"{BASE_URL}/{board_id}/{post_id}",
         }
 
-    print(f"พบรายการ HTML: {len(items)}")
-    print(f"พบโพสต์: {len(posts)}")
+    print(f"พบ candidate จาก DOM: {len(candidates)}")
+    print(f"พบโพสต์ใน Board {board_id}: {len(posts)}")
 
-    latest = sorted(
-        posts.keys(),
-        key=int,
-        reverse=True,
-    )[:5]
-
+    latest = sorted(posts.keys(), key=int, reverse=True)[:5]
     print("โพสต์ล่าสุดที่ตรวจพบ:")
-
     for pid in latest:
-        print(
-            f"  {pid} | "
-            f"{posts[pid]['title']}"
+        print(f"  {pid} | {posts[pid]['title']}")
+
+    if not posts:
+        body_text = page.locator("body").inner_text()[:2500]
+        html_length = page.locator("html").evaluate("(el) => el.outerHTML.length")
+        print("HTML length:", html_length)
+        print("BODY diagnostic:", body_text[:2500].replace("\\n", " | "))
+
+        lower_text = body_text.lower()
+        if any(term in lower_text for term in (
+            "captcha", "access denied", "cloudflare",
+            "unusual traffic", "잠시 후", "접근이"
+        )):
+            reason = "หน้า Hive อาจแสดงระบบป้องกันบอตหรือปฏิเสธการเข้าถึง"
+        elif html_length < 1500:
+            reason = "หน้า Hive ส่ง HTML กลับมาน้อยผิดปกติ"
+        else:
+            reason = "ไม่พบตัวระบุโพสต์ใน DOM ที่โหลดได้ อาจมีการเปลี่ยนโครงสร้างหน้าเว็บ"
+
+        raise RuntimeError(
+            f"Board {board_id}: {reason}. "
+            f"title={page.title()!r}, url={page.url!r}, "
+            f"html_length={html_length}, candidates={len(candidates)}"
         )
 
     return posts
-
 
 def clean_content(text, post):
     """ทำความสะอาดข้อความจากหน้าประกาศ"""
