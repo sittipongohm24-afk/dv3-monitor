@@ -124,7 +124,7 @@ def fetch_posts(page, board_id):
                 const dataBoard =
                     attrs["data-board-id"] ||
                     attrs["data-board"] || "";
-                if (/^\\d+$/.test(dataId) && dataBoard) {
+                if (/^\d+$/.test(dataId) && dataBoard) {
                     ids.push({board: dataBoard, id: dataId});
                 }
 
