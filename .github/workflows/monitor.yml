@@ -1,6 +1,9 @@
 name: DV3 update monitor
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
   schedule:
     - cron: "7 * * * *"
 
@@ -17,7 +20,76 @@ permissions:
 concurrency: dv3-monitor
 
 jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate Python syntax
+        run: python -m py_compile monitor.py
+
+
+  hive-smoke-test:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Playwright
+        run: pip install playwright
+
+      - name: Install Chromium
+        run: playwright install --with-deps chromium
+
+      - name: Verify Hive Board 13 and Board 5
+        run: |
+          python - <<'PY'
+          from playwright.sync_api import sync_playwright
+          from monitor import fetch_posts
+
+          with sync_playwright() as p:
+              browser = p.chromium.launch()
+              page = browser.new_page()
+              page.goto("https://community.withhive.com/dv3/th/board/13", wait_until="domcontentloaded", timeout=60000)
+              page.wait_for_timeout(5000)
+              diagnostic = page.locator("body").evaluate("""body => {
+                  const out = {anchors: [], titleAncestors: []};
+                  for (const a of body.querySelectorAll("a")) {
+                      const t = (a.innerText || "").trim();
+                      const h = a.getAttribute("href") || "";
+                      if (t || h) out.anchors.push({text:t.slice(0,120), href:h, onclick:a.getAttribute("onclick"), cls:a.className});
+                  }
+                  const target = [...body.querySelectorAll("*")].find(e => (e.children.length === 0) && (e.innerText || "").includes("อัปเดตประกาศบ"));
+                  let e = target;
+                  for (let i=0; e && i<6; i++, e=e.parentElement) out.titleAncestors.push(e.outerHTML.slice(0,2500));
+                  return out;
+              }""")
+              print("HIVE DOM DIAGNOSTIC:", diagnostic)
+              for board_id in ("13", "5"):
+                  posts = fetch_posts(page, board_id)
+                  if not posts:
+                      raise SystemExit(f"Board {board_id}: no posts detected")
+                  print(f"PASS Board {board_id}: detected {len(posts)} posts")
+              browser.close()
+          PY
+
   check:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
 
     steps:
