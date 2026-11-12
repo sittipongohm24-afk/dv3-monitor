@@ -36,6 +36,43 @@ jobs:
       - name: Validate Python syntax
         run: python -m py_compile monitor.py
 
+
+  hive-smoke-test:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Playwright
+        run: pip install playwright
+
+      - name: Install Chromium
+        run: playwright install --with-deps chromium
+
+      - name: Verify Hive Board 13 and Board 5
+        run: |
+          python - <<'PY'
+          from playwright.sync_api import sync_playwright
+          from monitor import fetch_posts
+
+          with sync_playwright() as p:
+              browser = p.chromium.launch()
+              page = browser.new_page()
+              for board_id in ("13", "5"):
+                  posts = fetch_posts(page, board_id)
+                  if not posts:
+                      raise SystemExit(f"Board {board_id}: no posts detected")
+                  print(f"PASS Board {board_id}: detected {len(posts)} posts")
+              browser.close()
+          PY
+
   check:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
