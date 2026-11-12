@@ -105,11 +105,11 @@ def fetch_posts(page, board_id):
 
                 const source = onclick + " " + href;
                 const detailMatches = [...source.matchAll(
-                    /detail\\s*\\(\\s*['"]?(\\d+)['"]?\\s*,\\s*['"]?(\\d+)['"]?\\s*\\)/gi
+                    /detail\s*\(\s*['"]?(\d+)['"]?\s*,\s*['"]?(\d+)['"]?\s*\)/gi
                 )];
 
                 const pathMatches = [...href.matchAll(
-                    /\\/board\\/(\\d+)\\/(\\d+)(?:[/?#]|$)/g
+                    /\/board\/(\d+)\/(\d+)(?:[/?#]|$)/g
                 )];
 
                 const ids = [];
@@ -196,7 +196,7 @@ def fetch_posts(page, board_id):
         body_text = page.locator("body").inner_text()[:2500]
         html_length = page.locator("html").evaluate("(el) => el.outerHTML.length")
         print("HTML length:", html_length)
-        print("BODY diagnostic:", body_text[:2500].replace("\\n", " | "))
+        print("BODY diagnostic:", body_text[:2500].replace("\n", " | "))
 
         lower_text = body_text.lower()
         if any(term in lower_text for term in (
